@@ -34,7 +34,9 @@ import org.quartz.JobDataMap;
 import org.quartz.JobDetail;
 import org.quartz.Scheduler;
 import org.quartz.SchedulerException;
+import org.quartz.Trigger;
 import org.quartz.TriggerBuilder;
+import org.quartz.TriggerKey;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -160,6 +162,24 @@ public class QuartzScheduledPollConsumerScheduler extends ServiceSupport impleme
             setQuartzScheduler(quartz.getScheduler());
         }
 
+        String id = triggerId;
+        if (id == null) {
+            id = "trigger-" + getCamelContext().getUuidGenerator().generateUuid();
+        }
+        TriggerKey triggerKey = new TriggerKey(id, triggerGroup);
+
+        // Add or use existing trigger to/from scheduler
+        Trigger trigger = quartzScheduler.getTrigger(triggerKey);
+        if (trigger != null) {
+            // TODO do some last sanity checks, e.g. that routeID must be identical
+            checkTriggerIsNonConflicting(trigger);
+
+            LOG.debug("Trigger with key {} is already present in scheduler");
+            return;
+        }
+
+        // if we're here already, no such trigger exists yet and we create & add it now
+
         JobDataMap map = new JobDataMap();
         // do not store task as its not serializable, if we have route id
         if (routeId != null) {
@@ -178,18 +198,19 @@ public class QuartzScheduledPollConsumerScheduler extends ServiceSupport impleme
         // store additional information on job such as camel context etc
         QuartzHelper.updateJobDataMap(getCamelContext(), job, null);
 
-        String id = triggerId;
-        if (id == null) {
-            id = "trigger-" + getCamelContext().getUuidGenerator().generateUuid();
-        }
-
-        trigger = TriggerBuilder.newTrigger()
-                .withIdentity(id, triggerGroup)
-                .withSchedule(CronScheduleBuilder.cronSchedule(getCron()).inTimeZone(getTimeZone()))
-                .build();
+        CronScheduleBuilder cronSchedule = CronScheduleBuilder.cronSchedule(getCron()).inTimeZone(getTimeZone());
+        trigger = TriggerBuilder.newTrigger().withIdentity(triggerKey).withSchedule(cronSchedule).build();
 
         LOG.debug("Scheduling job: {} with trigger: {}", job, trigger.getKey());
         quartzScheduler.scheduleJob(job, trigger);
+    }
+
+    private void checkTriggerIsNonConflicting(Trigger trigger) {
+        JobDataMap jobDataMap = trigger.getJobDataMap();
+        String routeIdFromTrigger = jobDataMap.getString("routeId");
+        if (routeIdFromTrigger != null && !routeIdFromTrigger.equals(routeId)) {
+            throw new IllegalArgumentException("Trigger key " + trigger.getKey() + " is already used by route" + routeIdFromTrigger + ". Can't re-use it for route " + routeId);
+        }
     }
 
     @Override

@@ -34,7 +34,6 @@ import org.apache.camel.spi.UriParam;
 import org.apache.camel.util.EndpointHelper;
 import org.quartz.Job;
 import org.quartz.JobBuilder;
-import org.quartz.JobDataMap;
 import org.quartz.JobDetail;
 import org.quartz.Scheduler;
 import org.quartz.SimpleTrigger;
@@ -235,10 +234,9 @@ public class QuartzEndpoint extends DefaultEndpoint {
     private void addJobInScheduler() throws Exception {
         // Add or use existing trigger to/from scheduler
         Scheduler scheduler = getComponent().getScheduler();
-        JobDetail jobDetail;
         Trigger trigger = scheduler.getTrigger(triggerKey);
         if (trigger == null) {
-            jobDetail = createJobDetail();
+            JobDetail jobDetail = createJobDetail();
             trigger = createTrigger(jobDetail);
 
             QuartzHelper.updateJobDataMap(getCamelContext(), jobDetail, getEndpointUri());
