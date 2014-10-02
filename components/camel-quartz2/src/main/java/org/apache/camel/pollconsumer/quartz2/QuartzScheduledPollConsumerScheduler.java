@@ -170,51 +170,47 @@ public class QuartzScheduledPollConsumerScheduler extends ServiceSupport impleme
 
         // Add or use existing trigger to/from scheduler
         Trigger trigger = quartzScheduler.getTrigger(triggerKey);
+
         if (trigger == null) {
             createAndScheduleTrigger(triggerKey);
+            return;
+        }
+
+        // trigger exists already; make some sanity checks and update it if
+        // needed
+        this.job = retrieveAndvalidateJobOfTrigger(trigger);
+        // it's now safe to cast
+        CronTrigger cronTrigger = (CronTrigger) trigger;
+        
+        if (isTriggerHasExpectedCronExpression(cronTrigger)) {
+            LOG.debug("Trigger with key {} is already present in scheduler. Lets assume nothing needs to be updated. "
+                + "Job: {}, JobData: {}, Trigger: {}", new Object []{cronTrigger.getKey(), job, job.getJobDataMap(), cronTrigger});
 
         } else {
-            checkTriggerIsNonConflicting(trigger);
-            // it's now safe to cast
-            CronTrigger cronTrigger = (CronTrigger) trigger;
-            job = quartzScheduler.getJobDetail(cronTrigger.getJobKey());;
-
-            if (isTriggerHasExpectedCronExpressionAndJobClass(job, cronTrigger, getCron())) {
-                LOG.debug("Trigger with key {} is already present in scheduler. Lets assume nothing needs to be updated.", cronTrigger.getKey());
-
-                LOG.debug("Job: {}, JobData: {}, Trigger: {}", new Object[] {job, job.getJobDataMap(), cronTrigger});
-                // job = quartzScheduler.getJobDetail(cronTrigger.getJobKey());
-                //
-                // QuartzHelper.updateJobDataMap(getCamelContext(), job, null);
-                //
-                // // update the job in the scheduler. Note the replace=true argument
-                // quartzScheduler.addJob(job, true);
-                //
-                // LOG.info("Re-scheduling job: {} with trigger: {}", job, trigger.getKey());
-                // quartzScheduler.rescheduleJob(triggerKey, cronTrigger);
-            } else {
-                LOG.info(
-                    "Cron expression {} in existing trigger with key {} deviates from the configured expression {}. Will replace the trigger with the configured expression",
-                         new Object[] {cronTrigger.getCronExpression(), cronTrigger.getKey(), this.cron});
-
-                JobDataMap jobData = job.getJobDataMap();
-                jobData.put(QuartzConstants.QUARTZ_TRIGGER_CRON_EXPRESSION, getCron());
-                jobData.put(QuartzConstants.QUARTZ_TRIGGER_CRON_TIMEZONE, getTimeZone().getID());
-
-                // store additional information on job such as camel context etc
-                QuartzHelper.updateJobDataMap(getCamelContext(), job, null);
-
-                // update the job in the scheduler. Note the replace=true argument
-                quartzScheduler.addJob(job, true, true);
-
-                CronScheduleBuilder cronSchedule = CronScheduleBuilder.cronSchedule(getCron()).inTimeZone(getTimeZone());
-                Trigger newTrigger = cronTrigger.getTriggerBuilder().withSchedule(cronSchedule).build();
-
-                LOG.info("Re-scheduling job: {} with trigger: {}", job, trigger.getKey());
-                quartzScheduler.rescheduleJob(triggerKey, newTrigger);
-            }
-
+            LOG.info("Cron expression {} in existing trigger with key {} deviates from the configured expression {}. "
+                + "Will replace the trigger with the configured expression", new Object[] {cronTrigger.getCronExpression(), cronTrigger.getKey(), this.cron});
+            updateAndRescheduleTrigger(triggerKey, trigger, cronTrigger);
         }
+    }
+
+
+
+    private void updateAndRescheduleTrigger(TriggerKey triggerKey, Trigger trigger, CronTrigger cronTrigger) throws SchedulerException {
+        JobDataMap jobData = job.getJobDataMap();
+        jobData.put(QuartzConstants.QUARTZ_TRIGGER_CRON_EXPRESSION, getCron());
+        jobData.put(QuartzConstants.QUARTZ_TRIGGER_CRON_TIMEZONE, getTimeZone().getID());
+
+        // store additional information on job such as camel context etc
+        QuartzHelper.updateJobDataMap(getCamelContext(), job, null);
+
+        // update the job in the scheduler. Note the replace=true argument
+        quartzScheduler.addJob(job, true, true);
+
+        CronScheduleBuilder cronSchedule = CronScheduleBuilder.cronSchedule(getCron()).inTimeZone(getTimeZone());
+        Trigger newTrigger = cronTrigger.getTriggerBuilder().withSchedule(cronSchedule).build();
+
+        LOG.info("Re-scheduling job: {} with trigger: {}", job, trigger.getKey());
+        quartzScheduler.rescheduleJob(triggerKey, newTrigger);
     }
 
     private void createAndScheduleTrigger(TriggerKey triggerKey) throws SchedulerException {
@@ -244,27 +240,61 @@ public class QuartzScheduledPollConsumerScheduler extends ServiceSupport impleme
         quartzScheduler.scheduleJob(job, trigger);
     }
 
-    private void checkTriggerIsNonConflicting(Trigger trigger) {
-        JobDataMap jobDataMap = trigger.getJobDataMap();
-        String routeIdFromTrigger = jobDataMap.getString("routeId");
-        if (routeIdFromTrigger != null && !routeIdFromTrigger.equals(routeId)) {
-            throw new IllegalArgumentException("Trigger key " + trigger.getKey() + " is already used by route" + routeIdFromTrigger + ". Can't re-use it for route " + routeId);
+    /**
+     * Retrieves the job belonging to the passed trigger and validates that both
+     * are compatible with the settings found in our configuration.
+     * <p>
+     * If {@link JobDetail} or {@link Trigger} are found to be incompatible with
+     * the configuration, an {@link IllegalStateException} is thrown. We want to
+     * avoid doing any damage to those, so abort.
+     * <p>
+     * 
+     * @param trigger The existing Trigger
+     * @return the {@link JobDetail} belonging to the passed Trigger. If a
+     *         JobDetail is returned, it is guaranteed that the passed trigger
+     *         is a {@link CronTrigger}.
+     * @throws SchedulerException if job cannot be retrieved from Scheduler
+     */
+    private JobDetail retrieveAndvalidateJobOfTrigger(Trigger trigger) throws SchedulerException {
+        if (!(trigger instanceof CronTrigger)) {
+            throw new IllegalStateException("Trigger with key " + trigger.getKey() + " exists already, but is not a Cron Trigger. Giving up on incompatible trigger types: "
+                                            + trigger.getClass().getName());
         }
 
-        if (!(trigger instanceof CronTrigger)) {
-            throw new IllegalArgumentException("Trigger with key " + trigger.getKey()
-                + " exists already, but is not a Cron Trigger. Giving up on incompatible trigger types: " + trigger.getClass().getName());
+        JobDetail jobOfTrigger = quartzScheduler.getJobDetail(trigger.getJobKey());
+        JobDataMap jobDataMap = jobOfTrigger.getJobDataMap();
+        String routeIdFromTrigger = jobDataMap.getString("routeId");
+
+        if (routeIdFromTrigger != null && !routeIdFromTrigger.equals(routeId)) {
+            throw new IllegalStateException("Trigger key " + trigger.getKey() + " is already used by route" + routeIdFromTrigger + ". Can't re-use it for route " + routeId);
         }
+
+        if (!QuartzScheduledPollConsumerJob.class.equals(jobOfTrigger.getJobClass())) {
+            throw new IllegalStateException("Job " + jobOfTrigger + " of trigger with key " + trigger.getKey() + " runs unexpected Job class "
+                                            + jobOfTrigger.getJobClass().getName() + ", not the expected " + QuartzScheduledPollConsumerJob.class.getName());
+        }
+
         // TODO any more sanity checks we can do?
+
+        return jobOfTrigger;
     }
 
-    private boolean isTriggerHasExpectedCronExpressionAndJobClass(JobDetail job, CronTrigger trigger, String expectedCronExpression) {
-        JobDataMap jobData = trigger.getJobDataMap();
-        LOG.debug("jobdata map keys & values for trigger {}: {} {}", new Object[] {trigger.getKey(), jobData.getWrappedMap().keySet(), jobData.getWrappedMap().values()});
+    /**
+     * Checks whether the existing trigger needs to be updated. It is compared
+     * against the configured Cron pattern.
+     * 
+     * @param trigger The existing Trigger
+     * @return {@code true} if the existing trigger reflects the current
+     *         configuration. Otherwise {@code false}.
+     */
+    private boolean isTriggerHasExpectedCronExpression(CronTrigger trigger) {
+        String expectedCronExpression = getCron();
+        if (expectedCronExpression == null || expectedCronExpression.trim().isEmpty()) {
+            return false;
+        }
 
-        boolean result = expectedCronExpression.trim().equals(trigger.getCronExpression());
-        result = result && QuartzScheduledPollConsumerJob.class.equals(job.getJobClass());
-        return result;
+        return expectedCronExpression.trim().equals(trigger.getCronExpression());
+
     }
 
     @Override
@@ -277,6 +307,7 @@ public class QuartzScheduledPollConsumerScheduler extends ServiceSupport impleme
 
     @Override
     protected void doShutdown() throws Exception {
+        // do nothing
     }
 
 }
