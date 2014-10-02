@@ -103,56 +103,6 @@ public class QuartzScheduledPollConsumerScheduler extends ServiceSupport impleme
     }
 
     @Override
-    public void setCamelContext(CamelContext camelContext) {
-        this.camelContext = camelContext;
-    }
-
-    @Override
-    public CamelContext getCamelContext() {
-        return camelContext;
-    }
-
-    public Scheduler getQuartzScheduler() {
-        return quartzScheduler;
-    }
-
-    public void setQuartzScheduler(Scheduler scheduler) {
-        this.quartzScheduler = scheduler;
-    }
-
-    public String getCron() {
-        return cron;
-    }
-
-    public void setCron(String cron) {
-        this.cron = cron;
-    }
-
-    public TimeZone getTimeZone() {
-        return timeZone;
-    }
-
-    public void setTimeZone(TimeZone timeZone) {
-        this.timeZone = timeZone;
-    }
-
-    public String getTriggerId() {
-        return triggerId;
-    }
-
-    public void setTriggerId(String triggerId) {
-        this.triggerId = triggerId;
-    }
-
-    public String getTriggerGroup() {
-        return triggerGroup;
-    }
-
-    public void setTriggerGroup(String triggerGroup) {
-        this.triggerGroup = triggerGroup;
-    }
-
-    @Override
     protected void doStart() throws Exception {
         ObjectHelper.notEmpty(cron, "cron", this);
 
@@ -308,6 +258,59 @@ public class QuartzScheduledPollConsumerScheduler extends ServiceSupport impleme
     @Override
     protected void doShutdown() throws Exception {
         // do nothing
+    }
+
+    // ----------------------------------
+    // Getters and Setters
+
+    @Override
+    public void setCamelContext(CamelContext camelContext) {
+        this.camelContext = camelContext;
+    }
+
+    @Override
+    public CamelContext getCamelContext() {
+        return camelContext;
+    }
+
+    public Scheduler getQuartzScheduler() {
+        return quartzScheduler;
+    }
+
+    public void setQuartzScheduler(Scheduler scheduler) {
+        this.quartzScheduler = scheduler;
+    }
+
+    public String getCron() {
+        return cron;
+    }
+
+    public void setCron(String cron) {
+        this.cron = cron;
+    }
+
+    public TimeZone getTimeZone() {
+        return timeZone;
+    }
+
+    public void setTimeZone(TimeZone timeZone) {
+        this.timeZone = timeZone;
+    }
+
+    public String getTriggerId() {
+        return triggerId;
+    }
+
+    public void setTriggerId(String triggerId) {
+        this.triggerId = triggerId;
+    }
+
+    public String getTriggerGroup() {
+        return triggerGroup;
+    }
+
+    public void setTriggerGroup(String triggerGroup) {
+        this.triggerGroup = triggerGroup;
     }
 
 }
